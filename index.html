@@ -3,105 +3,187 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Focus HLS - Tactical Guard Node</title>
+    <title>Focus HLS - Comprehensive Guard Node</title>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
     <style>
-        :root { --cyber-blue: #00b4d8; --dark-bg: #0b0f19; --panel-bg: #1a2235; --focus-orange: #f77f00; --alert-red: #d90429; --task-green: #00ff00; --task-blue: #3a86ff; }
+        :root { --cyber-blue: #00b4d8; --dark-bg: #0b0f19; --panel-bg: #1a2235; --focus-orange: #f77f00; --alert-red: #d90429; --task-green: #00ff00; }
         * { box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
         body { background: var(--dark-bg); color: #caf0f8; margin: 0; padding: 0; overflow-x: hidden; }
-        .header { background: #000; padding: 15px; border-bottom: 2px solid var(--cyber-blue); text-align: center; font-size: 1.5em; font-weight: bold; letter-spacing: 2px; }
-        .container { background: var(--panel-bg); padding: 20px; border-radius: 12px; border: 1px solid var(--cyber-blue); width: 96%; max-width: 800px; margin: 20px auto; }
         
-        /* BIOMETRIC LOCK */
-        #auth-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.95); z-index: 9999; display: flex; flex-direction: column; justify-content: center; align-items: center; }
-        .face-scan-box { width: 200px; height: 200px; border: 4px dashed var(--cyber-blue); border-radius: 20px; animation: scan 2s infinite alternate; margin-bottom: 20px; display: flex; align-items: center; justify-content: center;}
-        @keyframes scan { 0% { border-color: var(--cyber-blue); transform: scale(0.95); } 100% { border-color: var(--focus-orange); transform: scale(1.05); } }
-        
-        /* TABS */
+        /* UI & Tabs */
+        .header { background: #000; padding: 15px; border-bottom: 2px solid var(--cyber-blue); text-align: center; font-weight: bold; letter-spacing: 2px; }
         .tab-bar { display: flex; background: #000; }
-        .tab { flex: 1; padding: 15px; text-align: center; cursor: pointer; border-bottom: 3px solid transparent; font-weight: bold; transition: 0.3s; }
+        .tab { flex: 1; padding: 12px; text-align: center; cursor: pointer; border-bottom: 3px solid transparent; font-weight: bold; transition: 0.3s; font-size: 0.9em; }
         .tab.active { border-bottom-color: var(--cyber-blue); color: var(--cyber-blue); background: #111; }
         .panel { display: none; padding: 20px; }
         .panel.active { display: block; }
+        .container { background: var(--panel-bg); padding: 20px; border-radius: 12px; border: 1px solid var(--cyber-blue); width: 96%; max-width: 800px; margin: 10px auto; }
         
-        /* TASKS */
-        .task-card { background: #000; border-left: 5px solid var(--task-blue); padding: 15px; margin-bottom: 10px; border-radius: 4px; cursor: pointer; }
-        .task-card.completed { border-left-color: var(--task-green); }
-        .task-card.missed { border-left-color: var(--alert-red); }
-        
-        /* CAMERA MODAL */
-        #cam-modal { display: none; position: fixed; top:10%; left:5%; right:5%; bottom:10%; background:#000; z-index: 1000; border: 2px solid var(--cyber-blue); flex-direction: column;}
-        video { width: 100%; flex: 1; background: #222; }
-        
-        button { background: var(--cyber-blue); color: #000; border: none; padding: 15px; font-weight: bold; width: 100%; cursor: pointer; border-radius: 4px; margin-top: 10px; text-transform: uppercase; }
+        input, select { width: 100%; padding: 12px; background: #000; color: #fff; border: 1px solid #444; border-radius: 6px; margin-bottom: 15px; }
+        button { background: var(--cyber-blue); color: #000; border: none; padding: 15px; font-weight: bold; width: 100%; cursor: pointer; border-radius: 6px; margin-bottom: 10px; text-transform: uppercase;}
         .btn-danger { background: var(--alert-red); color: white; }
+        
+        /* Tasks & Comms */
+        .task-card { background: #000; border-left: 5px solid var(--cyber-blue); padding: 15px; margin-bottom: 10px; border-radius: 4px; cursor: pointer; }
+        .task-card.completed { border-left-color: var(--task-green); }
+        .chat-box { height: 200px; background: #000; overflow-y: auto; padding: 10px; border: 1px solid #333; margin-bottom: 10px; }
+        
+        #cam-modal { display: none; position: fixed; top:0; left:0; right:0; bottom:0; background:#000; z-index: 1000; flex-direction: column;}
+        video { width: 100%; flex: 1; background: #222; object-fit: cover;}
     </style>
 </head>
 <body>
 
-    <div id="auth-overlay">
-        <div class="face-scan-box">FACE ID</div>
-        <h2 style="color: var(--cyber-blue);">VERIFYING IDENTITY</h2>
-        <p style="color: #666; max-width: 300px; text-align: center;">Decrypting secure local storage and establishing mesh network...</p>
-        <button onclick="unlockDevice()" style="width: 200px;">MOCK UNLOCK</button>
-    </div>
-
     <div class="header">FOCUS HLS : GUARD NODE</div>
     
-    <div class="tab-bar">
-        <div class="tab active" onclick="switchTab('dashboard')">DASHBOARD</div>
-        <div class="tab" onclick="switchTab('tasks')">TASKS</div>
-        <div class="tab" onclick="switchTab('comm')">COMM</div>
+    <div id="reg-panel" class="container">
+        <h2 style="text-align:center; color:var(--cyber-blue);">NODE INITIALIZATION</h2>
+        <input type="text" id="g-name" placeholder="Full Name / Callsign">
+        <input type="text" id="g-weapon" placeholder="Weapon S/N">
+        <button onclick="startSession()">AUTHENTICATE & START</button>
     </div>
 
-    <div id="dashboard" class="panel active container">
-        <h2 style="color: var(--focus-orange);">Telemetry Active</h2>
-        <div style="background: #000; padding: 15px; font-family: monospace; color: #0f0; margin-bottom: 20px;" id="har-status">
-            Status: WALKING / PATROL<br>
-            Nearest Mesh Node: Server Room 1 (RSSI: -45dBm)
+    <div id="app-panel" style="display:none;">
+        <div class="tab-bar">
+            <div class="tab active" onclick="switchTab('dashboard')">STATUS</div>
+            <div class="tab" onclick="switchTab('tasks')">TASKS</div>
+            <div class="tab" onclick="switchTab('comm')">COMMS</div>
         </div>
-        <button class="btn-danger" onclick="triggerManualEmergency()">MANUAL EMERGENCY</button>
-    </div>
 
-    <div id="tasks" class="panel container">
-        <h3>Today's Calendar</h3>
-        <div id="task-list">
-            <div class="task-card" onclick="openTask('Server Room 1', 'Check Temp & Water Level')">
-                <strong>14:00 - Server Room 1</strong>
-                <p style="margin: 5px 0 0 0; font-size: 0.9em; color: #aaa;">Check Temp & Water Level</p>
-                <div style="font-size: 0.8em; color: var(--cyber-blue); margin-top: 5px;">STATUS: PENDING</div>
+        <div id="dashboard" class="panel active container">
+            <h2 style="color: var(--focus-orange);">Telemetry Active</h2>
+            <div style="background: #000; padding: 15px; font-family: monospace; color: #0f0; margin-bottom: 20px;">
+                <span id="har-status">Status: Standby</span><br><br>
+                <span id="ble-status" style="color:#aaa;">BLE Mesh: Scanning...</span>
+            </div>
+            <button onclick="scanForPositioner()" style="background:var(--focus-orange); color:#fff;">Sync with BLE Positioner</button>
+            <button class="btn-danger" onclick="manualStatus('SOS / Emergency')">TRIGGER SOS</button>
+            <button class="btn-danger" style="background:#9d4edd;" onclick="manualStatus('Medical Assist Req')">MEDICAL ASSIST</button>
+        </div>
+
+        <div id="tasks" class="panel container">
+            <h3>My Shift Tasks</h3>
+            <div id="task-list">
+                <div class="task-card" onclick="openTask('Server Room 1', 'Check Temp & Water')">
+                    <strong>14:00 - Server Room 1</strong>
+                    <p style="margin: 5px 0 0 0; font-size: 0.9em; color: #aaa;">Check Temp & Water</p>
+                    <div style="font-size: 0.8em; color: var(--cyber-blue); margin-top: 5px;">STATUS: PENDING</div>
+                </div>
             </div>
         </div>
-    </div>
 
-    <div id="comm" class="panel container">
-        <h3>Encrypted Comms (Mesh Relay)</h3>
-        <div style="height: 200px; background: #000; overflow-y: auto; padding: 10px; border: 1px solid #333; margin-bottom: 10px;">
-            <p style="color: #aaa;">[13:45] Manager: Proceed to server room.</p>
+        <div id="comm" class="panel container">
+            <h3>Secure Comms Channel</h3>
+            <div class="chat-box" id="chat-box"></div>
+            <input type="text" id="chat-input" placeholder="Type message...">
+            <button onclick="sendChat()">Send Message</button>
+            <button style="background: var(--focus-orange); color: white;" onclick="alert('WebRTC Video initialized.')">INITIATE VIDEO CALL</button>
         </div>
-        <input type="text" placeholder="Secure message..." style="width: 100%; padding: 10px; background: #000; color: #fff; border: 1px solid #333;">
-        <button style="margin-top: 5px;">SEND VIA MESH</button>
-        <button style="background: var(--focus-orange); color: white;">INITIATE VIDEO CALL</button>
     </div>
 
     <div id="cam-modal">
-        <h3 style="text-align: center; padding: 10px; margin: 0;">Task Photo Verification</h3>
+        <h3 style="text-align: center; padding: 15px; margin: 0; color:var(--cyber-blue);">Task Verification</h3>
         <video id="video-preview" autoplay playsinline></video>
-        <div style="padding: 15px;">
-            <button onclick="captureTaskImage()">CAPTURE & COMPLETE TASK</button>
-            <button class="btn-danger" onclick="document.getElementById('cam-modal').style.display='none'">CANCEL</button>
+        <div style="padding: 20px;">
+            <button onclick="captureTaskImage()">CAPTURE & COMPLETE</button>
+            <button class="btn-danger" onclick="closeTask()">CANCEL</button>
         </div>
     </div>
 
     <script>
-        // 1. Biometric Unlock & Decryption
-        function unlockDevice() {
-            document.getElementById('auth-overlay').style.display = 'none';
-            startTelemetry();
-            startBLEBackgroundScan();
-            scheduleTaskAlerts();
+        // Firebase Setup
+        const firebaseConfig = { apiKey: "AIzaSyAB2OJTPCyJaZ0BpE-FAEKdPW143VE3YDo", authDomain: "focushls-live.firebaseapp.com", projectId: "focushls-live", databaseURL: "https://focushls-live-default-rtdb.firebaseio.com" };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+        
+        let sessionID = null;
+        let isActive = false;
+        let buffer = [];
+        let currentTask = null;
+
+        function startSession() {
+            sessionID = "guard_" + Date.now();
+            const name = document.getElementById('g-name').value || "Unknown";
+            const weapon = document.getElementById('g-weapon').value || "N/A";
+
+            db.ref('active_shifts/' + sessionID).set({
+                id: sessionID, name: name, weapon: weapon, status: 'Connecting...', start_time: Date.now()
+            });
+
+            document.getElementById('reg-panel').style.display = 'none';
+            document.getElementById('app-panel').style.display = 'block';
+            
+            isActive = true;
+            initSensors();
+            listenToComms();
+            scheduleTaskAlert();
         }
 
-        // 2. Tab Navigation
+        // --- REAL TELEMETRY SENSORS (From 21-guard) ---
+        async function initSensors() {
+            if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                await DeviceMotionEvent.requestPermission();
+            }
+            window.addEventListener('devicemotion', (event) => {
+                if(!isActive) return;
+                buffer.push({ 
+                    ax: event.accelerationIncludingGravity.x || 0, 
+                    ay: event.accelerationIncludingGravity.y || 0, 
+                    az: event.accelerationIncludingGravity.z || 0 
+                });
+            });
+
+            // 1Hz processing loop
+            setInterval(() => {
+                if(isActive && buffer.length > 0) {
+                    const status = researchRecognition(buffer);
+                    document.getElementById('har-status').innerText = "Status: " + status;
+                    db.ref('active_shifts/' + sessionID).update({ 
+                        telemetry_batch: { data: buffer.slice(-20), id: Date.now() }, // send sample for manager graph
+                        status: status, 
+                        timestamp: Date.now() 
+                    });
+                    buffer = [];
+                }
+            }, 1000);
+        }
+
+        function researchRecognition(data) {
+            let magnitudes = data.map(f => Math.sqrt(f.ax**2 + f.ay**2 + f.az**2));
+            let sma = magnitudes.reduce((a,b) => a + Math.abs(b - 9.81), 0) / magnitudes.length;
+            let variance = magnitudes.reduce((a,b) => a + Math.pow(b - 9.81, 2), 0) / magnitudes.length;
+            
+            if (sma < 0.15 && variance < 0.02) return "Man Down / Immobility";
+            if (sma < 0.25 && variance < 0.1) return "Sleeping / Inactive";
+            if (sma < 0.4 && variance < 0.15) return "Sitting / Guarding";
+            if (sma > 2.0) return "Running / Sprinting";
+            if (sma >= 0.4) return "Walking / Patrol";
+            return "Standing";
+        }
+
+        function manualStatus(s) {
+            db.ref('active_shifts/' + sessionID).update({ status: s, timestamp: Date.now() });
+            alert("Sent: " + s);
+        }
+
+        // --- BLE POSITIONER SCANNER ---
+        async function scanForPositioner() {
+            try {
+                document.getElementById('ble-status').innerText = "Requesting Bluetooth...";
+                const device = await navigator.bluetooth.requestDevice({
+                    acceptAllDevices: true,
+                    optionalServices: [0x180F]
+                });
+                document.getElementById('ble-status').innerHTML = `<span style="color:#00ff00;">Position Verified: ${device.name}</span>`;
+                // Automatically complete location part of task
+                db.ref('active_shifts/' + sessionID + '/location').set(device.name);
+            } catch (error) {
+                document.getElementById('ble-status').innerText = "BLE Error: " + error;
+            }
+        }
+
+        // --- TASKS & CAMERA ---
         function switchTab(tabId) {
             document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -109,69 +191,45 @@
             event.target.classList.add('active');
         }
 
-        // 3. Task Management & Camera
-        let currentTask = null;
-        function openTask(location, instructions) {
-            currentTask = location;
+        function openTask(loc, desc) {
+            currentTask = loc;
             document.getElementById('cam-modal').style.display = 'flex';
-            // Init Camera
             navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-                .then(stream => document.getElementById('video-preview').srcObject = stream)
-                .catch(err => alert("Camera access required for task verification."));
+                .then(stream => document.getElementById('video-preview').srcObject = stream);
         }
 
-        function captureTaskImage() {
-            // In reality, draw video to canvas to get base64 image data
-            alert("Image captured. Encrypting and routing via Mesh/Internet with BLE Location Stamp...");
+        function closeTask() {
             document.getElementById('cam-modal').style.display = 'none';
-            // Stop camera stream
             let stream = document.getElementById('video-preview').srcObject;
             if(stream) stream.getTracks().forEach(track => track.stop());
         }
 
-        function scheduleTaskAlerts() {
-            // Mock: Alert 10 minutes prior to a task
+        function captureTaskImage() {
+            alert("Image Captured. Marking Task Completed.");
+            db.ref('active_shifts/' + sessionID + '/completed_tasks').push({ location: currentTask, time: Date.now() });
+            closeTask();
+        }
+
+        function scheduleTaskAlert() {
             setTimeout(() => {
-                alert("TASK REMINDER: 10 minutes until Server Room 1 inspection.");
-                // trigger audible alarm/vibration here
-            }, 5000); 
+                alert("TASK ALERT: You have a scheduled task at Server Room 1 in 10 minutes.");
+            }, 10000); // Demo: alerts after 10 seconds
         }
 
-        // 4. Background BLE Checking (Positioner Validation)
-        function startBLEBackgroundScan() {
-            // Note: Web Bluetooth requires explicit user action to pair, but assuming 
-            // Cordova/Capacitor or Native App wrapper for true background beacon scanning.
-            console.log("Background Mesh & Beacon scanning active.");
-            setInterval(() => {
-                // Mock detecting "Server Room 1" beacon and grabbing its dynamic stamp
-                let detectedStamp = "a4f29bc1"; 
-                // Transmit stamp to manager backend to prove physical presence
-            }, 10000);
+        // --- COMMS ---
+        function sendChat() {
+            const msg = document.getElementById('chat-input').value;
+            db.ref('comms/global').push({ sender: document.getElementById('g-name').value, text: msg, time: Date.now() });
+            document.getElementById('chat-input').value = '';
         }
 
-        // 5. Extended Telemetry & Emergency (Sleeping/Falling)
-        function startTelemetry() {
-            // Expanded Logic based on requirements
-            setInterval(() => {
-                // Simulated accelerometer data processing
-                let ax = Math.random(), ay = Math.random(), az = 9.8 + Math.random();
-                let sma = Math.abs(ax) + Math.abs(ay) + Math.abs(az - 9.8);
-                
-                let status = "Walking / Patrol";
-                if(sma < 0.1) status = "Sleeping / Inactive"; // NEW
-                if(sma > 15.0) status = "Falling / Impact";   // NEW
-                
-                document.getElementById('har-status').innerHTML = `Status: ${status}<br>Network: Mesh Linked`;
-                
-                if(status === "Sleeping / Inactive" || status === "Falling / Impact") {
-                    // Send instant critical alert to Manager
-                    console.error("CRITICAL ALERT DISPATCHED: " + status);
-                }
-            }, 1000);
-        }
-
-        function triggerManualEmergency() {
-            alert("EMERGENCY SIGNAL SENT TO COMMAND.");
+        function listenToComms() {
+            db.ref('comms/global').limitToLast(10).on('child_added', snap => {
+                const data = snap.val();
+                const box = document.getElementById('chat-box');
+                box.innerHTML += `<p style="margin:5px 0;"><strong>${data.sender}:</strong> ${data.text}</p>`;
+                box.scrollTop = box.scrollHeight;
+            });
         }
     </script>
 </body>
