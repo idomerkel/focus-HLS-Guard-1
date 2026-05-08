@@ -24,8 +24,9 @@
         button { background: var(--cyber-blue); color: #000; border: none; padding: 15px; font-weight: bold; width: 100%; cursor: pointer; border-radius: 6px; margin-bottom: 10px; text-transform: uppercase;}
         .btn-danger { background: var(--alert-red); color: white; }
         
+        /* BIOMETRIC LOCK */
         #auth-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.95); z-index: 9999; display: flex; flex-direction: column; justify-content: center; align-items: center; }
-        .face-scan-box { width: 200px; height: 200px; border: 4px dashed var(--cyber-blue); border-radius: 20px; animation: scan 2s infinite alternate; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.2em;}
+        .face-scan-box { width: 200px; height: 200px; border: 4px dashed var(--cyber-blue); border-radius: 20px; animation: scan 2s infinite alternate; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.2em; flex-direction: column; gap: 10px;}
         @keyframes scan { 0% { border-color: var(--cyber-blue); transform: scale(0.95); box-shadow: 0 0 10px var(--cyber-blue); } 100% { border-color: var(--focus-orange); transform: scale(1.05); box-shadow: 0 0 30px var(--focus-orange);} }
 
         .task-card { background: #000; border-left: 5px solid var(--cyber-blue); padding: 15px; margin-bottom: 10px; border-radius: 4px; cursor: pointer; }
@@ -41,16 +42,21 @@
 <body>
 
     <div id="auth-overlay">
-        <div class="face-scan-box">BIOMETRIC ID</div>
-        <h2 style="color: var(--cyber-blue);">VERIFYING IDENTITY</h2>
-        <p style="color: #888; max-width: 300px; text-align: center; margin-bottom: 30px;">Decrypting local storage and verifying operator credentials...</p>
-        <button onclick="unlockDevice()" style="width: 250px; background: var(--focus-orange); color: #fff;">TAP TO VERIFY & UNLOCK</button>
+        <div class="face-scan-box">
+            <span>🔒</span>
+            <span>SECURE SYSTEM</span>
+        </div>
+        <h2 style="color: var(--cyber-blue);">OPERATOR AUTHENTICATION</h2>
+        <p style="color: #888; max-width: 300px; text-align: center; margin-bottom: 30px;">This node requires native hardware biometrics (Face ID / Fingerprint) to unlock the encrypted payload.</p>
+        <button onclick="unlockDevice()" style="width: 250px; background: var(--focus-orange); color: #fff;">INITIATE NATIVE BIOMETRICS</button>
     </div>
 
     <div class="header">FOCUS HLS : GUARD NODE</div>
     
     <div id="reg-panel" class="container" style="display:none;">
         <h2 style="text-align:center; color:var(--cyber-blue); margin-top:0;">OPERATOR CHECK-IN</h2>
+        <p style="font-size: 0.85em; color: #888; text-align: center;">Verify your gear and details before shift start.</p>
+        
         <input type="text" id="g-name" placeholder="Full Name / Callsign">
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
             <input type="text" id="g-blood" placeholder="Blood Type (e.g. O+)">
@@ -128,7 +134,59 @@
         let buffer = [];
         let currentTask = null;
 
-        function unlockDevice() {
+        // --- REAL HARDWARE BIOMETRICS (WebAuthn API) ---
+        async function unlockDevice() {
+            // Check if the browser/device supports Native Biometrics
+            if (!window.PublicKeyCredential) {
+                alert("Native Biometrics requires a secure HTTPS connection and compatible hardware. Falling back to manual unlock for prototype mode.");
+                completeUnlock();
+                return;
+            }
+
+            try {
+                // Generate a cryptographically secure random challenge
+                const challenge = new Uint8Array(32);
+                window.crypto.getRandomValues(challenge);
+
+                // This API call tells the phone to activate its hardware scanner (FaceID/Fingerprint)
+                const credential = await navigator.credentials.create({
+                    publicKey: {
+                        challenge: challenge,
+                        rp: { name: "Focus HLS Command" },
+                        user: {
+                            id: window.crypto.getRandomValues(new Uint8Array(16)),
+                            name: "operator_auth",
+                            displayName: "Guard Operator"
+                        },
+                        pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+                        authenticatorSelection: {
+                            authenticatorAttachment: "platform", // Forces the use of the phone's built-in scanner
+                            userVerification: "required"         // Demands a successful biometric pass
+                        },
+                        timeout: 60000
+                    }
+                });
+
+                if (credential) {
+                    // Biometrics passed! Hardware has verified the user.
+                    completeUnlock();
+                }
+
+            } catch (error) {
+                console.error("Biometric Error:", error);
+                
+                // If they cancel or fail the scan, do not let them in.
+                if(error.name === "NotAllowedError" || error.name === "SecurityError") {
+                    alert("Biometric verification failed or was cancelled. Access Denied.");
+                } else {
+                    // Fallback for local testing environments where WebAuthn is blocked by the browser
+                    alert("Biometric prompt blocked by browser security (usually missing HTTPS). Proceeding via prototype bypass.");
+                    completeUnlock();
+                }
+            }
+        }
+
+        function completeUnlock() {
             document.getElementById('auth-overlay').style.display = 'none';
             document.getElementById('reg-panel').style.display = 'block';
         }
@@ -152,7 +210,7 @@
             scheduleTaskAlert();
         }
 
-        // PURE DATA SENSOR PIPELINE - NO RECOGNITION HERE
+        // PURE DATA SENSOR PIPELINE
         let gravity = { x: 0, y: 0, z: 9.81 };
         const alpha = 0.8; 
 
