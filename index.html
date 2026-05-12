@@ -24,7 +24,6 @@
         button { background: var(--cyber-blue); color: #000; border: none; padding: 15px; font-weight: bold; width: 100%; cursor: pointer; border-radius: 6px; margin-bottom: 10px; text-transform: uppercase;}
         .btn-danger { background: var(--alert-red); color: white; }
         
-        /* BIOMETRIC LOCK */
         #auth-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.95); z-index: 9999; display: flex; flex-direction: column; justify-content: center; align-items: center; }
         .face-scan-box { width: 200px; height: 200px; border: 4px dashed var(--cyber-blue); border-radius: 20px; animation: scan 2s infinite alternate; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.2em; flex-direction: column; gap: 10px;}
         @keyframes scan { 0% { border-color: var(--cyber-blue); transform: scale(0.95); box-shadow: 0 0 10px var(--cyber-blue); } 100% { border-color: var(--focus-orange); transform: scale(1.05); box-shadow: 0 0 30px var(--focus-orange);} }
@@ -37,6 +36,8 @@
         .video-container { flex: 1; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #111; }
         video { width: 100%; height: 100%; object-fit: contain; }
         .cam-controls { padding: 20px; background: #000; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+
+        #incoming-call-alert { display:none; background: var(--alert-red); color: white; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 15px; animation: pulse 1s infinite; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -101,18 +102,23 @@
         </div>
 
         <div id="comm" class="panel container">
-            <h3>WebRTC Secure Link & Chat</h3>
+            <h3>Secure Comms & Video</h3>
+            <div id="incoming-call-alert">🚨 INCOMING VIDEO CALL FROM HQ 🚨<br><button onclick="answerVideoCall()" style="margin-top:10px; background:#fff; color:#d90429;">ANSWER CALL</button></div>
+            
             <div style="height: 200px; background: #000; border: 1px solid #444; margin-bottom:10px; position: relative;">
                 <video id="remoteVideo" autoplay playsinline style="width:100%; height:100%; object-fit:cover;"></video>
                 <video id="localVideo" autoplay playsinline muted style="width:80px; height:120px; position:absolute; bottom:10px; right:10px; border:1px solid #fff;"></video>
             </div>
-            <div style="display:flex; gap:10px; margin-bottom: 15px;">
-                <button onclick="startVideoCall()" style="background:var(--task-green); margin:0;">START VIDEO</button>
-                <button onclick="hangUp()" class="btn-danger" style="margin:0;">HANG UP</button>
-            </div>
+            <button onclick="hangUp()" class="btn-danger" style="margin-bottom: 15px;">HANG UP VIDEO</button>
+            
+            <select id="guard-chat-target" style="margin-bottom:5px;">
+                <option value="Global">Broadcast Global</option>
+                <option value="Manager">Direct Message Command (HQ)</option>
+                <option value="Group">My Team Group</option>
+            </select>
             <div class="chat-box" id="chat-box"></div>
             <div style="display:flex; gap:10px;">
-                <input type="text" id="chat-input" placeholder="Message Command..." style="margin:0;">
+                <input type="text" id="chat-input" placeholder="Message..." style="margin:0;">
                 <button onclick="sendChat()" style="width:auto; margin:0;">SEND</button>
             </div>
         </div>
@@ -142,110 +148,77 @@
         let gravity = { x: 0, y: 0, z: 9.81 };
         const alpha = 0.8; 
         
-        let ble_distances_map = {}; // Stores multiple node distances
-        let currentDB = 40; // Ambient Audio Decibels
+        let ble_distances_map = {}; 
+        let myAssignedNodes = {}; // Tracks nodes assigned by Command
+        let currentDB = 40; 
 
-        // --- REAL HARDWARE BIOMETRICS (WebAuthn API) ---
         async function unlockDevice() {
-            if (!window.PublicKeyCredential) {
-                alert("Native Biometrics requires a secure HTTPS connection and compatible hardware. Falling back to manual unlock for prototype mode.");
-                completeUnlock(); return;
-            }
+            if (!window.PublicKeyCredential) { alert("Native Biometrics requires a secure HTTPS connection and compatible hardware. Falling back to manual unlock for prototype mode."); completeUnlock(); return; }
             try {
                 const challenge = new Uint8Array(32); window.crypto.getRandomValues(challenge);
                 const credential = await navigator.credentials.create({
-                    publicKey: {
-                        challenge: challenge, rp: { name: "Focus HLS Command" },
-                        user: { id: window.crypto.getRandomValues(new Uint8Array(16)), name: "operator_auth", displayName: "Guard Operator" },
-                        pubKeyCredParams: [{ type: "public-key", alg: -7 }],
-                        authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
-                        timeout: 60000
-                    }
+                    publicKey: { challenge: challenge, rp: { name: "Focus HLS Command" }, user: { id: window.crypto.getRandomValues(new Uint8Array(16)), name: "operator_auth", displayName: "Guard Operator" }, pubKeyCredParams: [{ type: "public-key", alg: -7 }], authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" }, timeout: 60000 }
                 });
                 if (credential) completeUnlock();
             } catch (error) {
                 if(error.name === "NotAllowedError" || error.name === "SecurityError") alert("Biometric verification failed. Access Denied.");
-                else completeUnlock(); // Fallback for HTTP testing
+                else completeUnlock(); 
             }
         }
 
-        function completeUnlock() {
-            document.getElementById('auth-overlay').style.display = 'none';
-            document.getElementById('reg-panel').style.display = 'block';
-        }
+        function completeUnlock() { document.getElementById('auth-overlay').style.display = 'none'; document.getElementById('reg-panel').style.display = 'block'; }
 
         function startSession() {
             const rawName = document.getElementById('g-name').value || "Unknown Guard";
-            // Persist ID to prevent duplicates in Manager
             sessionID = "guard_" + rawName.replace(/[^a-zA-Z0-9]/g, '');
 
             db.ref('active_shifts/' + sessionID).update({
-                id: sessionID, name: rawName, 
-                group: document.getElementById('g-group').value,
+                id: sessionID, name: rawName, group: document.getElementById('g-group').value,
                 bloodType: document.getElementById('g-blood').value || "N/A", weapon: document.getElementById('g-weapon').value || "N/A", 
                 vehicle: document.getElementById('g-vehicle').value || "N/A", insurance: document.getElementById('g-insurance').value || "N/A", 
                 contact: document.getElementById('g-contact').value || "N/A", status: 'Active (Blind Mode)', start_time: Date.now()
             });
 
-            document.getElementById('reg-panel').style.display = 'none';
-            document.getElementById('app-panel').style.display = 'block';
+            document.getElementById('reg-panel').style.display = 'none'; document.getElementById('app-panel').style.display = 'block';
             
             isActive = true;
-            initSensors();
-            initAudio(); // Starts the Mic Decibel Reader
-            setupWebRTCListeners();
-            listenToComms(); // Hooks up to Global, Group, and Private
-            listenToTasks(); // Hooks up to Live Tasks
+            initSensors(); initAudio(); 
+            setupWebRTCListeners(); listenToComms(); listenToTasks();
+            
+            // Listen for Node Assignments to know what data to stream back
+            db.ref('active_shifts/' + sessionID + '/assigned_nodes').on('value', snap => {
+                myAssignedNodes = snap.val() || {};
+            });
         }
 
-        // --- MICROPHONE DECIBEL READER ---
         async function initAudio() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                const analyser = audioContext.createAnalyser();
-                const microphone = audioContext.createMediaStreamSource(stream);
-                microphone.connect(analyser);
-                analyser.fftSize = 256;
-                const bufferLength = analyser.frequencyBinCount;
-                const dataArray = new Uint8Array(bufferLength);
-
-                setInterval(() => {
-                    analyser.getByteFrequencyData(dataArray);
-                    let sum = 0;
-                    for(let i=0; i<bufferLength; i++) sum += dataArray[i];
-                    let average = sum / bufferLength;
-                    currentDB = 30 + (average / 255) * 70; // Map audio volume to 30dB - 100dB
-                }, 1000);
-            } catch(e) { console.log("Audio permission denied. Noise detection disabled."); }
+                const analyser = audioContext.createAnalyser(); const microphone = audioContext.createMediaStreamSource(stream);
+                microphone.connect(analyser); analyser.fftSize = 256; const bufferLength = analyser.frequencyBinCount; const dataArray = new Uint8Array(bufferLength);
+                setInterval(() => { analyser.getByteFrequencyData(dataArray); let sum = 0; for(let i=0; i<bufferLength; i++) sum += dataArray[i]; let average = sum / bufferLength; currentDB = 30 + (average / 255) * 70; }, 1000);
+            } catch(e) { console.log("Audio permission denied."); }
         }
 
-        // --- ACCELEROMETER PIPELINE ---
         async function initSensors() {
             if (typeof DeviceMotionEvent.requestPermission === 'function') await DeviceMotionEvent.requestPermission();
-            
             window.addEventListener('devicemotion', (event) => {
                 if(!isActive) return;
-                let rawX = event.accelerationIncludingGravity.x || 0;
-                let rawY = event.accelerationIncludingGravity.y || 0;
-                let rawZ = event.accelerationIncludingGravity.z || 0;
-
-                gravity.x = alpha * gravity.x + (1 - alpha) * rawX;
-                gravity.y = alpha * gravity.y + (1 - alpha) * rawY;
-                gravity.z = alpha * gravity.z + (1 - alpha) * rawZ;
-
+                let rawX = event.accelerationIncludingGravity.x || 0; let rawY = event.accelerationIncludingGravity.y || 0; let rawZ = event.accelerationIncludingGravity.z || 0;
+                gravity.x = alpha * gravity.x + (1 - alpha) * rawX; gravity.y = alpha * gravity.y + (1 - alpha) * rawY; gravity.z = alpha * gravity.z + (1 - alpha) * rawZ;
                 buffer.push({ ax: rawX - gravity.x, ay: rawY - gravity.y, az: rawZ - gravity.z });
             });
 
-            // Master Uploader (Includes Telemetry, BLE, and Audio)
             setInterval(() => {
                 if(isActive && buffer.length >= 10) {
-                    db.ref('active_shifts/' + sessionID).update({ 
-                        telemetry_batch: { data: buffer.slice(-20), id: Date.now() }, 
-                        ble_distances: ble_distances_map,
-                        audio_db: currentDB,
-                        timestamp: Date.now() 
+                    // Filter BLE map to only send assigned nodes to save bandwidth
+                    let payloadDistances = {};
+                    Object.keys(myAssignedNodes).forEach(node => {
+                        if(ble_distances_map[node] !== undefined) payloadDistances[node] = ble_distances_map[node];
                     });
+
+                    db.ref('active_shifts/' + sessionID).update({ telemetry_batch: { data: buffer.slice(-20), id: Date.now() }, ble_distances: payloadDistances, audio_db: currentDB, timestamp: Date.now() });
                     buffer = []; 
                 }
             }, 1000);
@@ -253,141 +226,87 @@
 
         function manualStatus(s) { db.ref('active_shifts/' + sessionID).update({ status: s, isManual: true, timestamp: Date.now() }); }
 
-        // --- REAL BLUETOOTH MULTI-TRACKER ---
+        // GUARD DOES THE BLE SCANNING HERE
         async function scanForPositioner() {
             try {
                 document.getElementById('ble-status').innerText = "Requesting System Bluetooth...";
                 const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [0x180F] });
-                
                 document.getElementById('ble-status').innerHTML = `<span style="color:var(--cyber-blue);">Bluetooth API Linked. Scanning physical nodes...</span>`;
-                
                 await device.watchAdvertisements();
                 
                 device.addEventListener('advertisementreceived', (event) => {
                     let nodeName = event.device.name || "Unknown ESP32";
-                    let rssi = event.rssi;
-                    // Convert RSSI to Physical Distance
-                    let distance = Math.pow(10, (-65 - rssi) / (10 * 2.5));
+                    let distance = Math.pow(10, (-65 - event.rssi) / (10 * 2.5));
                     
-                    ble_distances_map[nodeName] = distance; // Save to map for Firebase upload
+                    ble_distances_map[nodeName] = distance; 
                     
-                    // Update UI locally to show what it hears
-                    let uiString = "";
-                    Object.keys(ble_distances_map).forEach(n => uiString += `${n}: ${ble_distances_map[n].toFixed(1)}m<br>`);
+                    let uiString = ""; Object.keys(ble_distances_map).forEach(n => uiString += `${n}: ${ble_distances_map[n].toFixed(1)}m<br>`);
                     document.getElementById('ble-status').innerHTML = uiString;
                 });
             } catch (error) { document.getElementById('ble-status').innerText = "BLE Permissions Denied. Check settings."; }
         }
 
-        function switchTab(tabId) {
-            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.getElementById(tabId).classList.add('active'); event.target.classList.add('active');
-        }
+        function switchTab(tabId) { document.querySelectorAll('.panel').forEach(p => p.classList.remove('active')); document.querySelectorAll('.tab').forEach(t => t.classList.remove('active')); document.getElementById(tabId).classList.add('active'); event.target.classList.add('active'); }
 
-        // --- LIVE TASKS SYSTEM ---
+        // --- TASKS SYNC ---
         function listenToTasks() {
             const renderTasks = () => {
                 db.ref(`active_shifts/${sessionID}/tasks`).once('value', snapshot => {
-                    const tasks = snapshot.val();
-                    const list = document.getElementById('task-list');
-                    list.innerHTML = '';
+                    const tasks = snapshot.val(); const list = document.getElementById('task-list'); list.innerHTML = '';
                     if(tasks) {
                         Object.keys(tasks).forEach(key => {
-                            let t = tasks[key];
-                            let color = t.status === "completed" ? "var(--task-green)" : "var(--cyber-blue)";
-                            list.innerHTML += `
-                            <div class="task-card" style="border-left-color:${color};" onclick="openTask('${key}', '${t.instruction}')">
+                            let t = tasks[key]; let color = t.status === "completed" ? "var(--task-green)" : "var(--cyber-blue)";
+                            list.innerHTML += `<div class="task-card" style="border-left-color:${color};" onclick="openTask('${key}', '${t.instruction}')">
                                 <strong>${t.time} - Task Assigned</strong>
                                 <p style="margin: 5px 0 0 0; font-size: 0.9em; color: #aaa;">${t.instruction}</p>
-                                <div style="font-size: 0.8em; color: ${color}; margin-top: 5px;">STATUS: ${t.status.toUpperCase()}</div>
-                            </div>`;
+                                <div style="font-size: 0.8em; color: ${color}; margin-top: 5px;">STATUS: ${t.status.toUpperCase()}</div></div>`;
                         });
                     } else { list.innerHTML = "<p style='color:#555; text-align:center;'>No active tasks.</p>"; }
                 });
             };
-            
-            // Listen for the specific trigger pushed by Manager
-            db.ref(`active_shifts/${sessionID}/new_task_trigger`).on('value', renderTasks);
-            renderTasks(); // Initial load
+            db.ref(`active_shifts/${sessionID}/new_task_trigger`).on('value', renderTasks); renderTasks(); 
         }
 
-        function openTask(taskKey, instruction) {
-            currentTaskRef = taskKey;
-            document.getElementById('cam-modal').style.display = 'flex';
-            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-                .then(stream => document.getElementById('video-preview').srcObject = stream);
-        }
+        function openTask(taskKey, instruction) { currentTaskRef = taskKey; document.getElementById('cam-modal').style.display = 'flex'; navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }).then(stream => document.getElementById('video-preview').srcObject = stream); }
+        function closeTask() { document.getElementById('cam-modal').style.display = 'none'; let stream = document.getElementById('video-preview').srcObject; if(stream) stream.getTracks().forEach(track => track.stop()); }
+        function captureTaskImage() { if(!currentTaskRef) return; alert("Image Captured. Syncing to Command."); db.ref(`active_shifts/${sessionID}/tasks/${currentTaskRef}`).update({ status: "completed" }); db.ref(`active_shifts/${sessionID}/new_task_trigger`).set(Date.now()); closeTask(); }
 
-        function closeTask() {
-            document.getElementById('cam-modal').style.display = 'none';
-            let stream = document.getElementById('video-preview').srcObject;
-            if(stream) stream.getTracks().forEach(track => track.stop());
-        }
-
-        function captureTaskImage() {
-            if(!currentTaskRef) return;
-            alert("Image Captured. Syncing to Command.");
-            db.ref(`active_shifts/${sessionID}/tasks/${currentTaskRef}`).update({ status: "completed" });
-            db.ref(`active_shifts/${sessionID}/new_task_trigger`).set(Date.now()); // Force UI refresh
-            closeTask();
-        }
-
-        // --- TARGETED COMMS SYSTEM ---
-        function displayMessage(sender, msgText) {
-            const box = document.getElementById('chat-box');
-            box.innerHTML += `<p style="margin:5px 0;"><strong style="color:var(--cyber-blue);">${sender}:</strong> ${msgText}</p>`;
-            box.scrollTop = box.scrollHeight;
-        }
+        // --- TARGETED COMMS ---
+        function displayMessage(sender, msgText) { const box = document.getElementById('chat-box'); box.innerHTML += `<p style="margin:5px 0;"><strong style="color:var(--cyber-blue);">${sender}:</strong> ${msgText}</p>`; box.scrollTop = box.scrollHeight; }
 
         function listenToComms() {
-            const myGroup = document.getElementById('g-group').value;
-            const initTime = Date.now() - 5000; // Ignore old messages
-
-            // 1. Listen for Private Manager Messages
-            db.ref(`active_shifts/${sessionID}/messages`).on('child_added', snap => {
-                const data = snap.val(); if(data && data.timestamp > initTime) displayMessage(`[DIRECT] ${data.sender}`, data.msg);
-            });
-            // 2. Listen for Global Broadcasts
-            db.ref(`chats/Global`).limitToLast(1).on('child_added', snap => {
-                const data = snap.val(); if(data && data.timestamp > initTime) displayMessage(`[GLOBAL] ${data.sender}`, data.msg);
-            });
-            // 3. Listen for Group Chat
-            if(myGroup && myGroup !== "Unassigned") {
-                db.ref(`chats/Groups/${myGroup}`).limitToLast(1).on('child_added', snap => {
-                    const data = snap.val(); if(data && data.timestamp > initTime) displayMessage(`[TEAM ${myGroup}] ${data.sender}`, data.msg);
-                });
-            }
+            const myGroup = document.getElementById('g-group').value; const initTime = Date.now() - 5000;
+            db.ref(`active_shifts/${sessionID}/messages`).on('child_added', snap => { const data = snap.val(); if(data && data.timestamp > initTime) displayMessage(`[DIRECT] ${data.sender}`, data.msg); });
+            db.ref(`chats/Global`).limitToLast(1).on('child_added', snap => { const data = snap.val(); if(data && data.timestamp > initTime) displayMessage(`[GLOBAL] ${data.sender}`, data.msg); });
+            if(myGroup && myGroup !== "Unassigned") { db.ref(`chats/Groups/${myGroup}`).limitToLast(1).on('child_added', snap => { const data = snap.val(); if(data && data.timestamp > initTime) displayMessage(`[TEAM ${myGroup}] ${data.sender}`, data.msg); }); }
         }
 
         function sendChat() {
-            const msg = document.getElementById('chat-input').value;
-            if(!msg) return;
+            const target = document.getElementById('guard-chat-target').value;
+            const msg = document.getElementById('chat-input').value; if(!msg) return;
+            const senderName = document.getElementById('g-name').value;
+            const myGroup = document.getElementById('g-group').value;
+            const payload = { sender: senderName, msg: msg, timestamp: Date.now() };
+
+            if(target === 'Global') db.ref('chats/Global').push(payload);
+            else if(target === 'Manager') db.ref(`active_shifts/${sessionID}/messages`).push(payload); // Manager's direct chat box listens here
+            else if(target === 'Group') db.ref(`chats/Groups/${myGroup}`).push(payload);
             
-            // Guard broadcasts responses to Global so Manager sees it immediately
-            db.ref('chats/Global').push({ 
-                sender: document.getElementById('g-name').value, 
-                msg: msg, 
-                timestamp: Date.now() 
-            });
             document.getElementById('chat-input').value = '';
         }
 
-        // --- WEBRTC VIDEO ---
+        // --- WEBRTC VIDEO (GUARD ANSWERS) ---
         let localStream; let peerConnection;
         const servers = { iceServers: [{ urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] }] };
 
         async function setupWebRTCListeners() {
-            db.ref(`active_shifts/${sessionID}/webrtc/offer`).on('value', async snapshot => {
-                const offer = snapshot.val();
-                if(offer && !peerConnection) {
-                    await initPeerConnection();
-                    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-                    const answer = await peerConnection.createAnswer();
-                    await peerConnection.setLocalDescription(answer);
-                    db.ref(`active_shifts/${sessionID}/webrtc/answer`).set({ type: answer.type, sdp: answer.sdp });
-                }
+            // Listen for Manager Calling
+            db.ref(`active_shifts/${sessionID}/webrtc/offer`).on('value', snap => {
+                const offer = snap.val();
+                if(offer && !peerConnection) document.getElementById('incoming-call-alert').style.display = 'block';
             });
+            
+            // Listen for Manager ICE network candidates
             db.ref(`active_shifts/${sessionID}/webrtc/candidates/manager`).on('child_added', snapshot => {
                 if(peerConnection) peerConnection.addIceCandidate(new RTCIceCandidate(snapshot.val()));
             });
@@ -399,31 +318,30 @@
             peerConnection = new RTCPeerConnection(servers);
             localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
             peerConnection.ontrack = event => { document.getElementById('remoteVideo').srcObject = event.streams[0]; };
-            peerConnection.onicecandidate = event => {
-                if (event.candidate) db.ref(`active_shifts/${sessionID}/webrtc/candidates/guard`).push(event.candidate.toJSON());
-            };
+            peerConnection.onicecandidate = event => { if (event.candidate) db.ref(`active_shifts/${sessionID}/webrtc/candidates/guard`).push(event.candidate.toJSON()); };
         }
 
-        async function startVideoCall() {
+        async function answerVideoCall() {
+            const offerSnap = await db.ref(`active_shifts/${sessionID}/webrtc/offer`).once('value');
+            const offer = offerSnap.val();
+            if(!offer) return alert("No active incoming call.");
+            
+            document.getElementById('incoming-call-alert').style.display = 'none';
             await initPeerConnection();
-            const offer = await peerConnection.createOffer();
-            await peerConnection.setLocalDescription(offer);
-            db.ref(`active_shifts/${sessionID}/webrtc/offer`).set({ type: offer.type, sdp: offer.sdp });
-            db.ref(`active_shifts/${sessionID}/webrtc/answer`).on('value', snapshot => {
-                const answer = snapshot.val();
-                if(answer && peerConnection.currentRemoteDescription === null) {
-                    peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-                }
-            });
+            
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            
+            // Send answer back to Manager
+            db.ref(`active_shifts/${sessionID}/webrtc/answer`).set({ type: answer.type, sdp: answer.sdp });
         }
 
         function hangUp() {
-            if(peerConnection) peerConnection.close();
-            if(localStream) localStream.getTracks().forEach(track => track.stop());
-            peerConnection = null;
+            if(peerConnection) peerConnection.close(); if(localStream) localStream.getTracks().forEach(track => track.stop());
+            peerConnection = null; document.getElementById('incoming-call-alert').style.display = 'none';
             db.ref(`active_shifts/${sessionID}/webrtc`).remove();
-            document.getElementById('remoteVideo').srcObject = null;
-            document.getElementById('localVideo').srcObject = null;
+            document.getElementById('remoteVideo').srcObject = null; document.getElementById('localVideo').srcObject = null;
         }
     </script>
 </body>
