@@ -10,7 +10,6 @@
         :root { --cyber-blue: #00b4d8; --dark-bg: #0b0f19; --panel-bg: #1a2235; --focus-orange: #f77f00; --alert-red: #d90429; --task-green: #00ff00; }
         * { box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
         
-        /* Flexbox setup for app-like bottom navigation */
         body { background: var(--dark-bg); color: #caf0f8; margin: 0; padding: 0; overflow-x: hidden; display: flex; flex-direction: column; height: 100dvh;}
         
         .header { background: #000; padding: 15px; border-bottom: 2px solid var(--cyber-blue); text-align: center; font-weight: bold; letter-spacing: 2px; flex-shrink: 0;}
@@ -39,19 +38,20 @@
         .task-card.completed { border-left-color: var(--task-green); }
         .chat-box { height: 250px; background: #000; overflow-y: auto; padding: 10px; border: 1px solid #333; margin-bottom: 10px; font-size: 0.9em; }
         
-        /* New Full-Screen Task Modal with Back Button */
         #task-detail-modal { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background:var(--dark-bg); z-index: 2000; flex-direction: column; }
         .video-container { flex: 1; overflow: hidden; display: none; align-items: center; justify-content: center; background: #111; margin: 15px; border-radius: 8px; border: 1px solid var(--cyber-blue);}
         video { width: 100%; height: 100%; object-fit: contain; }
 
         #global-ring-alert { display: none; position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: var(--alert-red); color: white; padding: 20px 40px; border-radius: 12px; z-index: 10000; font-size: 1.5em; font-weight: bold; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.8); animation: pulse 0.5s infinite alternate; }
+
+        .disclaimer-box { background: #000; border: 1px solid #444; border-radius: 6px; padding: 15px; font-size: 0.85em; color: #aaa; height: 120px; overflow-y: auto; margin-bottom: 15px; text-align: left; line-height: 1.4; }
     </style>
 </head>
 <body>
 
     <div id="global-ring-alert">
         🚨 INCOMING VIDEO CALL FROM HQ 🚨<br>
-        <button onclick="switchTab('comm'); document.getElementById('global-ring-alert').style.display='none';" style="margin-top:15px; padding:10px 20px; font-weight:bold; background:#fff; color:#000; border:none; border-radius:6px; cursor:pointer;">GO TO COMMS TAB TO ANSWER</button>
+        <button onclick="switchTab('comm'); answerVideoCall();" style="margin-top:15px; padding:10px 20px; font-weight:bold; background:#fff; color:#000; border:none; border-radius:6px; cursor:pointer;">ANSWER CALL</button>
     </div>
 
     <div id="auth-overlay">
@@ -85,8 +85,17 @@
         <input type="text" id="g-vehicle" placeholder="Vehicle License Plate">
         <input type="text" id="g-insurance" placeholder="Insurance Policy Details">
         <input type="text" id="g-contact" placeholder="Emergency Contact (Name & Phone)">
-        <p style="font-size:0.8em; color:var(--focus-orange); text-align:center;">Logging in will prompt for Microphone & Bluetooth access.</p>
-        <button onclick="startSession()" style="margin-top: 10px; background:var(--task-green);">AUTHENTICATE & LOG IN</button>
+        
+        <div class="disclaimer-box" id="disclaimer-box" onscroll="checkDisclaimerScroll(this)">
+            <strong style="color:var(--focus-orange);">SECURITY & DATA TRACKING DISCLAIMER</strong><br><br>
+            By proceeding and logging in, you understand and explicitly agree to allow the continuous transfer of sensor, location, and audio data from your device to the centralized security command system.<br><br>
+            This data transfer is strictly utilized to safeguard you during an emergency, rapidly deploy assistance, and allow management to focus task assignments and communication tracking in one secure platform.<br><br>
+            All data is encrypted and monitored strictly for operational safety. Biometric unlock data remains on your physical hardware.<br><br>
+            <em style="color:#fff;">(Scroll to the bottom of this box to accept and continue...)</em>
+            <br><br><br><br>
+        </div>
+
+        <button id="login-btn" disabled style="background:#444; color:#888; cursor:not-allowed; transition: 0.3s;">SCROLL TO READ DISCLAIMER</button>
     </div>
 
     <div id="app-panel" style="display:none;">
@@ -181,6 +190,17 @@
         let ble_distances_map = {}; 
         let currentDB = 40; 
 
+        // --- SCROLL DISCLAIMER LOGIC ---
+        function checkDisclaimerScroll(el) {
+            if (el.scrollHeight - el.scrollTop <= el.clientHeight + 10) enableLogin();
+        }
+        function enableLogin() {
+            const btn = document.getElementById('login-btn');
+            if(btn.disabled) {
+                btn.disabled = false; btn.innerText = "AUTHENTICATE & LOG IN"; btn.style.background = 'var(--task-green)'; btn.style.color = '#000'; btn.style.cursor = 'pointer'; btn.onclick = startSession;
+            }
+        }
+
         async function unlockDevice() {
             if (!window.PublicKeyCredential) { alert("Native Biometrics requires a secure HTTPS connection and compatible hardware. Falling back to manual unlock for prototype mode."); completeUnlock(); return; }
             try {
@@ -195,7 +215,12 @@
             }
         }
 
-        function completeUnlock() { document.getElementById('auth-overlay').style.display = 'none'; document.getElementById('reg-panel').style.display = 'block'; }
+        function completeUnlock() { 
+            document.getElementById('auth-overlay').style.display = 'none'; 
+            document.getElementById('reg-panel').style.display = 'block'; 
+            const box = document.getElementById('disclaimer-box');
+            if(box && box.scrollHeight <= box.clientHeight + 10) enableLogin();
+        }
 
         // --- LOGIN & AUTO-START SENSORS ---
         async function startSession() {
@@ -213,12 +238,8 @@
             
             setupWebRTCListeners(); listenToComms(); listenToTasks();
 
-            // Automatically Trigger Hardware APIs 
             try {
-                await initSensors(); 
-                await initAudio(); 
-                
-                // Triggers the Browser BLE Popup immediately upon logging in
+                await initSensors(); await initAudio(); 
                 const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [0x180F] });
                 await device.watchAdvertisements();
                 device.addEventListener('advertisementreceived', (event) => {
@@ -227,10 +248,7 @@
                     ble_distances_map[nodeName] = distance; 
                 });
                 isActive = true;
-            } catch (error) {
-                console.error(error);
-                alert("Sensors or BLE Permission Denied. You must pair via the popup to stream telemetry to Command.");
-            }
+            } catch (error) { console.error(error); alert("Sensors or BLE Permission Denied. You must pair via the popup to stream telemetry to Command."); }
         }
 
         async function initAudio() {
@@ -252,7 +270,6 @@
 
             setInterval(() => {
                 if(isActive && buffer.length >= 10) {
-                    // Beams ALL scanned nodes. Manager Dashboard filters and renames via Alias System.
                     db.ref('active_shifts/' + sessionID).update({ telemetry_batch: { data: buffer.slice(-20), id: Date.now() }, ble_distances: ble_distances_map, audio_db: currentDB, timestamp: Date.now() });
                     buffer = []; 
                 }
@@ -337,54 +354,59 @@
         }
 
         // --- WEBRTC VIDEO ---
-        let localStream; let peerConnection;
+        let localStream; let peerConnection; let activeCallChannel = null; let currentWebRTCOffer = null;
         const servers = { iceServers: [{ urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] }] };
 
-        async function setupWebRTCListeners() {
-            db.ref(`active_shifts/${sessionID}/webrtc/offer`).on('value', snap => {
-                const offer = snap.val();
-                if(offer && !peerConnection) document.getElementById('global-ring-alert').style.display = 'block';
-            });
-            db.ref(`active_shifts/${sessionID}/webrtc/candidates/manager`).on('child_added', snapshot => {
-                if(peerConnection) peerConnection.addIceCandidate(new RTCIceCandidate(snapshot.val()));
-            });
-        }
-
-        async function initPeerConnection() {
+        async function initPeerConnection(channel, role) {
             localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             document.getElementById('localVideo').srcObject = localStream;
             peerConnection = new RTCPeerConnection(servers);
             localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
             peerConnection.ontrack = event => { document.getElementById('remoteVideo').srcObject = event.streams[0]; };
-            peerConnection.onicecandidate = event => { if (event.candidate) db.ref(`active_shifts/${sessionID}/webrtc/candidates/guard`).push(event.candidate.toJSON()); };
+            peerConnection.onicecandidate = event => { if (event.candidate) db.ref(`${channel}/candidates/${role}`).push(event.candidate.toJSON()); };
         }
 
+        // 1. Guard Initiates Call to Manager
         async function startVideoCall() {
-            await initPeerConnection();
+            activeCallChannel = `active_shifts/mgr_HQ/webrtc`;
+            await initPeerConnection(activeCallChannel, 'guard');
             const offer = await peerConnection.createOffer(); await peerConnection.setLocalDescription(offer);
-            db.ref(`active_shifts/mgr_HQ/webrtc/offer`).set({ type: offer.type, sdp: offer.sdp }); 
-            db.ref(`active_shifts/mgr_HQ/webrtc/answer`).on('value', snapshot => {
-                const answer = snapshot.val();
-                if(answer && peerConnection.currentRemoteDescription === null) peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+            db.ref(`${activeCallChannel}/offer`).set({ type: offer.type, sdp: offer.sdp, caller: sessionID }); 
+            
+            db.ref(`${activeCallChannel}/answer`).on('value', snapshot => {
+                const answer = snapshot.val(); if(answer && peerConnection.currentRemoteDescription === null) peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+            });
+            db.ref(`${activeCallChannel}/candidates/manager`).on('child_added', snapshot => { if(peerConnection) peerConnection.addIceCandidate(new RTCIceCandidate(snapshot.val())); });
+            alert("Ringing HQ...");
+        }
+
+        // 2. Guard Listens for Manager Calling Guard
+        function setupWebRTCListeners() {
+            db.ref(`active_shifts/${sessionID}/webrtc/offer`).on('value', snap => {
+                const offer = snap.val();
+                if(offer && !peerConnection) {
+                    activeCallChannel = `active_shifts/${sessionID}/webrtc`;
+                    currentWebRTCOffer = offer;
+                    document.getElementById('global-ring-alert').style.display = 'block';
+                }
             });
         }
 
+        // 3. Guard Answers Manager
         async function answerVideoCall() {
+            if(!currentWebRTCOffer) return alert("No active incoming call.");
             document.getElementById('global-ring-alert').style.display = 'none';
-            const offerSnap = await db.ref(`active_shifts/${sessionID}/webrtc/offer`).once('value');
-            const offer = offerSnap.val();
-            if(!offer) return alert("No active incoming call.");
-            
-            await initPeerConnection();
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+            await initPeerConnection(activeCallChannel, 'guard');
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(currentWebRTCOffer));
             const answer = await peerConnection.createAnswer(); await peerConnection.setLocalDescription(answer);
-            db.ref(`active_shifts/${sessionID}/webrtc/answer`).set({ type: answer.type, sdp: answer.sdp });
+            db.ref(`${activeCallChannel}/answer`).set({ type: answer.type, sdp: answer.sdp });
+            db.ref(`${activeCallChannel}/candidates/manager`).on('child_added', snapshot => { if(peerConnection) peerConnection.addIceCandidate(new RTCIceCandidate(snapshot.val())); });
         }
 
         function hangUp() {
             if(peerConnection) peerConnection.close(); if(localStream) localStream.getTracks().forEach(track => track.stop());
-            peerConnection = null; document.getElementById('global-ring-alert').style.display = 'none';
-            db.ref(`active_shifts/${sessionID}/webrtc`).remove();
+            peerConnection = null; currentWebRTCOffer = null; document.getElementById('global-ring-alert').style.display = 'none';
+            if(activeCallChannel) db.ref(activeCallChannel).remove();
             document.getElementById('remoteVideo').srcObject = null; document.getElementById('localVideo').srcObject = null;
         }
     </script>
