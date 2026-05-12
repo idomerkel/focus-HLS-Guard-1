@@ -115,6 +115,7 @@
 
         <div id="comm" class="panel container">
             <h3>Secure Comms & Video</h3>
+            
             <div style="height: 200px; background: #000; border: 1px solid #444; margin-bottom:10px; position: relative;">
                 <video id="remoteVideo" autoplay playsinline style="width:100%; height:100%; object-fit:cover;"></video>
                 <video id="localVideo" autoplay playsinline muted style="width:80px; height:120px; position:absolute; bottom:10px; right:10px; border:1px solid #fff;"></video>
@@ -139,7 +140,8 @@
     </div>
 
     <div id="cam-modal">
-        <h3 style="text-align: center; padding: 15px; margin: 0; color:var(--cyber-blue); background: #000;">Task Verification</h3>
+        <h3 style="text-align: center; padding: 15px 15px 0 15px; margin: 0; color:var(--cyber-blue); background: #000;">Task Verification</h3>
+        <p id="modal-task-desc" style="color:#aaa; text-align:center; padding: 0 15px 15px 15px; margin: 0; background: #000; font-weight:bold;"></p>
         <div class="video-container"><video id="video-preview" autoplay playsinline></video></div>
         <div class="cam-controls">
             <button onclick="captureTaskImage()">CAPTURE & COMPLETE</button>
@@ -205,7 +207,6 @@
                 await initSensors(); 
                 await initAudio(); 
                 
-                // Start BLE Scan
                 const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [0x180F] });
                 await device.watchAdvertisements();
                 device.addEventListener('advertisementreceived', (event) => {
@@ -256,7 +257,7 @@
 
         function switchTab(tabId) { document.querySelectorAll('.panel').forEach(p => p.classList.remove('active')); document.querySelectorAll('.tab').forEach(t => t.classList.remove('active')); document.getElementById(tabId).classList.add('active'); event.target.classList.add('active'); }
 
-        // --- TASKS SYNC ---
+        // --- TASKS SYNC & DESCRIPTION ---
         function listenToTasks() {
             const renderTasks = () => {
                 db.ref(`active_shifts/${sessionID}/tasks`).once('value', snapshot => {
@@ -264,7 +265,7 @@
                     if(tasks) {
                         Object.keys(tasks).forEach(key => {
                             let t = tasks[key]; let color = t.status === "completed" ? "var(--task-green)" : "var(--cyber-blue)";
-                            list.innerHTML += `<div class="task-card" style="border-left-color:${color};" onclick="openTask('${key}', '${t.instruction}')">
+                            list.innerHTML += `<div class="task-card" style="border-left-color:${color};" onclick="openTask('${key}', '${t.instruction.replace(/'/g, "\\'")}')">
                                 <strong>${t.time} - Task Assigned</strong>
                                 <p style="margin: 5px 0 0 0; font-size: 0.9em; color: #aaa;">${t.instruction}</p>
                                 <div style="font-size: 0.8em; color: ${color}; margin-top: 5px;">STATUS: ${t.status.toUpperCase()}</div></div>`;
@@ -275,7 +276,12 @@
             db.ref(`active_shifts/${sessionID}/new_task_trigger`).on('value', renderTasks); renderTasks(); 
         }
 
-        function openTask(taskKey, instruction) { currentTaskRef = taskKey; document.getElementById('cam-modal').style.display = 'flex'; navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }).then(stream => document.getElementById('video-preview').srcObject = stream); }
+        function openTask(taskKey, instruction) { 
+            currentTaskRef = taskKey; 
+            document.getElementById('modal-task-desc').innerText = instruction;
+            document.getElementById('cam-modal').style.display = 'flex'; 
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }).then(stream => document.getElementById('video-preview').srcObject = stream); 
+        }
         function closeTask() { document.getElementById('cam-modal').style.display = 'none'; let stream = document.getElementById('video-preview').srcObject; if(stream) stream.getTracks().forEach(track => track.stop()); }
         function captureTaskImage() { if(!currentTaskRef) return; alert("Image Captured. Syncing to Command."); db.ref(`active_shifts/${sessionID}/tasks/${currentTaskRef}`).update({ status: "completed" }); db.ref(`active_shifts/${sessionID}/new_task_trigger`).set(Date.now()); closeTask(); }
 
@@ -297,7 +303,7 @@
             const payload = { sender: senderName, msg: msg, timestamp: Date.now() };
 
             if(target === 'Global') db.ref('chats/Global').push(payload);
-            else if(target === 'Manager') db.ref(`active_shifts/${sessionID}/messages`).push(payload); // Manager's direct chat box listens here
+            else if(target === 'Manager') db.ref(`active_shifts/${sessionID}/messages`).push(payload);
             else if(target === 'Group') db.ref(`chats/Groups/${myGroup}`).push(payload);
             
             document.getElementById('chat-input').value = '';
@@ -329,7 +335,7 @@
         async function startVideoCall() {
             await initPeerConnection();
             const offer = await peerConnection.createOffer(); await peerConnection.setLocalDescription(offer);
-            db.ref(`active_shifts/mgr_HQ/webrtc/offer`).set({ type: offer.type, sdp: offer.sdp }); // Send offer specifically to HQ
+            db.ref(`active_shifts/mgr_HQ/webrtc/offer`).set({ type: offer.type, sdp: offer.sdp }); 
             db.ref(`active_shifts/mgr_HQ/webrtc/answer`).on('value', snapshot => {
                 const answer = snapshot.val();
                 if(answer && peerConnection.currentRemoteDescription === null) peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
