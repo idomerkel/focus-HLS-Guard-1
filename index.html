@@ -20,7 +20,7 @@
         .container { background: var(--panel-bg); padding: 20px; border-radius: 12px; border: 1px solid var(--cyber-blue); width: 96%; max-width: 800px; margin: 10px auto; }
         
         input, select { width: 100%; padding: 12px; background: #000; color: #fff; border: 1px solid #444; border-radius: 6px; margin-bottom: 15px; }
-        input:focus { border-color: var(--cyber-blue); outline: none; }
+        input:focus, select:focus { border-color: var(--cyber-blue); outline: none; }
         button { background: var(--cyber-blue); color: #000; border: none; padding: 15px; font-weight: bold; width: 100%; cursor: pointer; border-radius: 6px; margin-bottom: 10px; text-transform: uppercase;}
         .btn-danger { background: var(--alert-red); color: white; }
         
@@ -31,7 +31,7 @@
 
         .task-card { background: #000; border-left: 5px solid var(--cyber-blue); padding: 15px; margin-bottom: 10px; border-radius: 4px; cursor: pointer; }
         .task-card.completed { border-left-color: var(--task-green); }
-        .chat-box { height: 200px; background: #000; overflow-y: auto; padding: 10px; border: 1px solid #333; margin-bottom: 10px; }
+        .chat-box { height: 250px; background: #000; overflow-y: auto; padding: 10px; border: 1px solid #333; margin-bottom: 10px; font-size: 0.9em; }
         
         #cam-modal { display: none; position: fixed; top:0; left:0; right:0; bottom:0; background:#000; z-index: 1000; flex-direction: column; height: 100vh; justify-content: space-between;}
         .video-container { flex: 1; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #111; }
@@ -58,6 +58,13 @@
         <p style="font-size: 0.85em; color: #888; text-align: center;">Verify your gear and details before shift start.</p>
         
         <input type="text" id="g-name" placeholder="Full Name / Callsign">
+        <select id="g-group">
+            <option value="Security">Group: Security Team</option>
+            <option value="Cleaning">Group: Cleaning Team</option>
+            <option value="Maintenance">Group: Maintenance Team</option>
+            <option value="Unassigned">Group: Unassigned</option>
+        </select>
+
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
             <input type="text" id="g-blood" placeholder="Blood Type (e.g. O+)">
             <input type="text" id="g-weapon" placeholder="Weapon S/N">
@@ -77,11 +84,11 @@
 
         <div id="dashboard" class="panel active container">
             <h2 style="color: var(--focus-orange);">Telemetry Active</h2>
-            <div style="background: #000; padding: 15px; font-family: monospace; color: #0f0; margin-bottom: 20px;">
-                <span id="har-status">Tracking: <span style="color:var(--cyber-blue);">Streaming Raw Data to Command...</span></span><br><br>
-                <span id="ble-status" style="color:#aaa;">Positioner: Disconnected</span>
+            <div style="background: #000; padding: 15px; font-family: monospace; color: #0f0; margin-bottom: 20px; font-size: 0.9em;">
+                <span id="har-status">Tracking: <span style="color:var(--cyber-blue);">Streaming IMU + Audio Data...</span></span><br><br>
+                <span id="ble-status" style="color:#aaa;">Positioner Nodes: Scanning...</span>
             </div>
-            <button onclick="scanForPositioner()" style="background:var(--focus-orange); color:#fff;">Sync with BLE Positioner</button>
+            <button onclick="scanForPositioner()" style="background:var(--focus-orange); color:#fff;">Sync BLE Positioners</button>
             <button class="btn-danger" onclick="manualStatus('SOS / Emergency')">TRIGGER SOS</button>
             <button class="btn-danger" style="background:#9d4edd;" onclick="manualStatus('Medical Assist Req')">MEDICAL ASSIST</button>
         </div>
@@ -89,11 +96,7 @@
         <div id="tasks" class="panel container">
             <h3>My Shift Tasks</h3>
             <div id="task-list">
-                <div class="task-card" onclick="openTask('Server Room 1', 'Check Temp & Water')">
-                    <strong>14:00 - Server Room 1</strong>
-                    <p style="margin: 5px 0 0 0; font-size: 0.9em; color: #aaa;">Check Temp & Water</p>
-                    <div style="font-size: 0.8em; color: var(--cyber-blue); margin-top: 5px;">STATUS: PENDING</div>
-                </div>
+                <p style="color:#555; text-align:center;">Waiting for Command to assign tasks...</p>
             </div>
         </div>
 
@@ -107,9 +110,9 @@
                 <button onclick="startVideoCall()" style="background:var(--task-green); margin:0;">START VIDEO</button>
                 <button onclick="hangUp()" class="btn-danger" style="margin:0;">HANG UP</button>
             </div>
-            <div class="chat-box" id="chat-box" style="height:120px;"></div>
+            <div class="chat-box" id="chat-box"></div>
             <div style="display:flex; gap:10px;">
-                <input type="text" id="chat-input" placeholder="Type message..." style="margin:0;">
+                <input type="text" id="chat-input" placeholder="Message Command..." style="margin:0;">
                 <button onclick="sendChat()" style="width:auto; margin:0;">SEND</button>
             </div>
         </div>
@@ -125,64 +128,44 @@
     </div>
 
     <script>
+        // --- FIREBASE INIT ---
         const firebaseConfig = { apiKey: "AIzaSyAB2OJTPCyJaZ0BpE-FAEKdPW143VE3YDo", authDomain: "focushls-live.firebaseapp.com", projectId: "focushls-live", databaseURL: "https://focushls-live-default-rtdb.firebaseio.com" };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
         
         let sessionID = null;
         let isActive = false;
+        let currentTaskRef = null;
+
+        // PURE DATA SENSOR PIPELINE
         let buffer = [];
-        let currentTask = null;
+        let gravity = { x: 0, y: 0, z: 9.81 };
+        const alpha = 0.8; 
+        
+        let ble_distances_map = {}; // Stores multiple node distances
+        let currentDB = 40; // Ambient Audio Decibels
 
         // --- REAL HARDWARE BIOMETRICS (WebAuthn API) ---
         async function unlockDevice() {
-            // Check if the browser/device supports Native Biometrics
             if (!window.PublicKeyCredential) {
                 alert("Native Biometrics requires a secure HTTPS connection and compatible hardware. Falling back to manual unlock for prototype mode.");
-                completeUnlock();
-                return;
+                completeUnlock(); return;
             }
-
             try {
-                // Generate a cryptographically secure random challenge
-                const challenge = new Uint8Array(32);
-                window.crypto.getRandomValues(challenge);
-
-                // This API call tells the phone to activate its hardware scanner (FaceID/Fingerprint)
+                const challenge = new Uint8Array(32); window.crypto.getRandomValues(challenge);
                 const credential = await navigator.credentials.create({
                     publicKey: {
-                        challenge: challenge,
-                        rp: { name: "Focus HLS Command" },
-                        user: {
-                            id: window.crypto.getRandomValues(new Uint8Array(16)),
-                            name: "operator_auth",
-                            displayName: "Guard Operator"
-                        },
+                        challenge: challenge, rp: { name: "Focus HLS Command" },
+                        user: { id: window.crypto.getRandomValues(new Uint8Array(16)), name: "operator_auth", displayName: "Guard Operator" },
                         pubKeyCredParams: [{ type: "public-key", alg: -7 }],
-                        authenticatorSelection: {
-                            authenticatorAttachment: "platform", // Forces the use of the phone's built-in scanner
-                            userVerification: "required"         // Demands a successful biometric pass
-                        },
+                        authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
                         timeout: 60000
                     }
                 });
-
-                if (credential) {
-                    // Biometrics passed! Hardware has verified the user.
-                    completeUnlock();
-                }
-
+                if (credential) completeUnlock();
             } catch (error) {
-                console.error("Biometric Error:", error);
-                
-                // If they cancel or fail the scan, do not let them in.
-                if(error.name === "NotAllowedError" || error.name === "SecurityError") {
-                    alert("Biometric verification failed or was cancelled. Access Denied.");
-                } else {
-                    // Fallback for local testing environments where WebAuthn is blocked by the browser
-                    alert("Biometric prompt blocked by browser security (usually missing HTTPS). Proceeding via prototype bypass.");
-                    completeUnlock();
-                }
+                if(error.name === "NotAllowedError" || error.name === "SecurityError") alert("Biometric verification failed. Access Denied.");
+                else completeUnlock(); // Fallback for HTTP testing
             }
         }
 
@@ -192,9 +175,13 @@
         }
 
         function startSession() {
-            sessionID = "guard_" + Date.now();
-            db.ref('active_shifts/' + sessionID).set({
-                id: sessionID, name: document.getElementById('g-name').value || "Unknown Guard", 
+            const rawName = document.getElementById('g-name').value || "Unknown Guard";
+            // Persist ID to prevent duplicates in Manager
+            sessionID = "guard_" + rawName.replace(/[^a-zA-Z0-9]/g, '');
+
+            db.ref('active_shifts/' + sessionID).update({
+                id: sessionID, name: rawName, 
+                group: document.getElementById('g-group').value,
                 bloodType: document.getElementById('g-blood').value || "N/A", weapon: document.getElementById('g-weapon').value || "N/A", 
                 vehicle: document.getElementById('g-vehicle').value || "N/A", insurance: document.getElementById('g-insurance').value || "N/A", 
                 contact: document.getElementById('g-contact').value || "N/A", status: 'Active (Blind Mode)', start_time: Date.now()
@@ -205,15 +192,35 @@
             
             isActive = true;
             initSensors();
+            initAudio(); // Starts the Mic Decibel Reader
             setupWebRTCListeners();
-            listenToComms();
-            scheduleTaskAlert();
+            listenToComms(); // Hooks up to Global, Group, and Private
+            listenToTasks(); // Hooks up to Live Tasks
         }
 
-        // PURE DATA SENSOR PIPELINE
-        let gravity = { x: 0, y: 0, z: 9.81 };
-        const alpha = 0.8; 
+        // --- MICROPHONE DECIBEL READER ---
+        async function initAudio() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const analyser = audioContext.createAnalyser();
+                const microphone = audioContext.createMediaStreamSource(stream);
+                microphone.connect(analyser);
+                analyser.fftSize = 256;
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
 
+                setInterval(() => {
+                    analyser.getByteFrequencyData(dataArray);
+                    let sum = 0;
+                    for(let i=0; i<bufferLength; i++) sum += dataArray[i];
+                    let average = sum / bufferLength;
+                    currentDB = 30 + (average / 255) * 70; // Map audio volume to 30dB - 100dB
+                }, 1000);
+            } catch(e) { console.log("Audio permission denied. Noise detection disabled."); }
+        }
+
+        // --- ACCELEROMETER PIPELINE ---
         async function initSensors() {
             if (typeof DeviceMotionEvent.requestPermission === 'function') await DeviceMotionEvent.requestPermission();
             
@@ -230,10 +237,13 @@
                 buffer.push({ ax: rawX - gravity.x, ay: rawY - gravity.y, az: rawZ - gravity.z });
             });
 
+            // Master Uploader (Includes Telemetry, BLE, and Audio)
             setInterval(() => {
                 if(isActive && buffer.length >= 10) {
                     db.ref('active_shifts/' + sessionID).update({ 
                         telemetry_batch: { data: buffer.slice(-20), id: Date.now() }, 
+                        ble_distances: ble_distances_map,
+                        audio_db: currentDB,
                         timestamp: Date.now() 
                     });
                     buffer = []; 
@@ -241,36 +251,69 @@
             }, 1000);
         }
 
-        function manualStatus(s) { 
-            db.ref('active_shifts/' + sessionID).update({ status: s, isManual: true, timestamp: Date.now() }); 
-        }
+        function manualStatus(s) { db.ref('active_shifts/' + sessionID).update({ status: s, isManual: true, timestamp: Date.now() }); }
 
-        let positionerInterval = null;
+        // --- REAL BLUETOOTH MULTI-TRACKER ---
         async function scanForPositioner() {
             try {
-                document.getElementById('ble-status').innerText = "Requesting Bluetooth...";
+                document.getElementById('ble-status').innerText = "Requesting System Bluetooth...";
                 const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [0x180F] });
-                document.getElementById('ble-status').innerHTML = `<span style="color:#00ff00;">Tracking: ${device.name}</span>`;
                 
-                let simDist = 80;
-                if(positionerInterval) clearInterval(positionerInterval);
-                positionerInterval = setInterval(() => {
-                    simDist = simDist + (Math.random() * 10 - 5);
-                    if(simDist > 100) simDist = 100; if(simDist < 10) simDist = 10;
-                    db.ref('active_shifts/' + sessionID + '/ble_data').set({ node: device.name, rssi: -Math.abs(Math.round(simDist)) });
-                }, 2000);
-            } catch (error) { document.getElementById('ble-status').innerText = "BLE Error: " + error; }
+                document.getElementById('ble-status').innerHTML = `<span style="color:var(--cyber-blue);">Bluetooth API Linked. Scanning physical nodes...</span>`;
+                
+                await device.watchAdvertisements();
+                
+                device.addEventListener('advertisementreceived', (event) => {
+                    let nodeName = event.device.name || "Unknown ESP32";
+                    let rssi = event.rssi;
+                    // Convert RSSI to Physical Distance
+                    let distance = Math.pow(10, (-65 - rssi) / (10 * 2.5));
+                    
+                    ble_distances_map[nodeName] = distance; // Save to map for Firebase upload
+                    
+                    // Update UI locally to show what it hears
+                    let uiString = "";
+                    Object.keys(ble_distances_map).forEach(n => uiString += `${n}: ${ble_distances_map[n].toFixed(1)}m<br>`);
+                    document.getElementById('ble-status').innerHTML = uiString;
+                });
+            } catch (error) { document.getElementById('ble-status').innerText = "BLE Permissions Denied. Check settings."; }
         }
 
         function switchTab(tabId) {
             document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.getElementById(tabId).classList.add('active');
-            event.target.classList.add('active');
+            document.getElementById(tabId).classList.add('active'); event.target.classList.add('active');
         }
 
-        function openTask(loc, desc) {
-            currentTask = loc;
+        // --- LIVE TASKS SYSTEM ---
+        function listenToTasks() {
+            const renderTasks = () => {
+                db.ref(`active_shifts/${sessionID}/tasks`).once('value', snapshot => {
+                    const tasks = snapshot.val();
+                    const list = document.getElementById('task-list');
+                    list.innerHTML = '';
+                    if(tasks) {
+                        Object.keys(tasks).forEach(key => {
+                            let t = tasks[key];
+                            let color = t.status === "completed" ? "var(--task-green)" : "var(--cyber-blue)";
+                            list.innerHTML += `
+                            <div class="task-card" style="border-left-color:${color};" onclick="openTask('${key}', '${t.instruction}')">
+                                <strong>${t.time} - Task Assigned</strong>
+                                <p style="margin: 5px 0 0 0; font-size: 0.9em; color: #aaa;">${t.instruction}</p>
+                                <div style="font-size: 0.8em; color: ${color}; margin-top: 5px;">STATUS: ${t.status.toUpperCase()}</div>
+                            </div>`;
+                        });
+                    } else { list.innerHTML = "<p style='color:#555; text-align:center;'>No active tasks.</p>"; }
+                });
+            };
+            
+            // Listen for the specific trigger pushed by Manager
+            db.ref(`active_shifts/${sessionID}/new_task_trigger`).on('value', renderTasks);
+            renderTasks(); // Initial load
+        }
+
+        function openTask(taskKey, instruction) {
+            currentTaskRef = taskKey;
             document.getElementById('cam-modal').style.display = 'flex';
             navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
                 .then(stream => document.getElementById('video-preview').srcObject = stream);
@@ -283,27 +326,54 @@
         }
 
         function captureTaskImage() {
-            alert("Image Captured. Marking Task Completed.");
-            db.ref('active_shifts/' + sessionID + '/completed_tasks').push({ location: currentTask, time: Date.now() });
+            if(!currentTaskRef) return;
+            alert("Image Captured. Syncing to Command.");
+            db.ref(`active_shifts/${sessionID}/tasks/${currentTaskRef}`).update({ status: "completed" });
+            db.ref(`active_shifts/${sessionID}/new_task_trigger`).set(Date.now()); // Force UI refresh
             closeTask();
         }
 
-        function scheduleTaskAlert() { setTimeout(() => { alert("TASK ALERT: You have a scheduled task at Server Room 1 in 10 minutes."); }, 10000); }
+        // --- TARGETED COMMS SYSTEM ---
+        function displayMessage(sender, msgText) {
+            const box = document.getElementById('chat-box');
+            box.innerHTML += `<p style="margin:5px 0;"><strong style="color:var(--cyber-blue);">${sender}:</strong> ${msgText}</p>`;
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function listenToComms() {
+            const myGroup = document.getElementById('g-group').value;
+            const initTime = Date.now() - 5000; // Ignore old messages
+
+            // 1. Listen for Private Manager Messages
+            db.ref(`active_shifts/${sessionID}/messages`).on('child_added', snap => {
+                const data = snap.val(); if(data && data.timestamp > initTime) displayMessage(`[DIRECT] ${data.sender}`, data.msg);
+            });
+            // 2. Listen for Global Broadcasts
+            db.ref(`chats/Global`).limitToLast(1).on('child_added', snap => {
+                const data = snap.val(); if(data && data.timestamp > initTime) displayMessage(`[GLOBAL] ${data.sender}`, data.msg);
+            });
+            // 3. Listen for Group Chat
+            if(myGroup && myGroup !== "Unassigned") {
+                db.ref(`chats/Groups/${myGroup}`).limitToLast(1).on('child_added', snap => {
+                    const data = snap.val(); if(data && data.timestamp > initTime) displayMessage(`[TEAM ${myGroup}] ${data.sender}`, data.msg);
+                });
+            }
+        }
 
         function sendChat() {
             const msg = document.getElementById('chat-input').value;
-            db.ref('comms/global').push({ sender: document.getElementById('g-name').value, text: msg, time: Date.now() });
+            if(!msg) return;
+            
+            // Guard broadcasts responses to Global so Manager sees it immediately
+            db.ref('chats/Global').push({ 
+                sender: document.getElementById('g-name').value, 
+                msg: msg, 
+                timestamp: Date.now() 
+            });
             document.getElementById('chat-input').value = '';
         }
-        function listenToComms() {
-            db.ref('comms/global').limitToLast(10).on('child_added', snap => {
-                const data = snap.val();
-                const box = document.getElementById('chat-box');
-                box.innerHTML += `<p style="margin:5px 0;"><strong>${data.sender}:</strong> ${data.text}</p>`;
-                box.scrollTop = box.scrollHeight;
-            });
-        }
 
+        // --- WEBRTC VIDEO ---
         let localStream; let peerConnection;
         const servers = { iceServers: [{ urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] }] };
 
